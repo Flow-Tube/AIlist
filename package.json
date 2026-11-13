@@ -1,0 +1,15 @@
+{
+  "name": "flow-ailist",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static, signed, versioned mirror of the AiSList channel lists for Flow",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "dry-run": "node src/publish.js --dry-run --out ./out"
+  }
+}
