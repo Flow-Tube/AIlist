@@ -1,0 +1,21 @@
+{
+  "id": "aislist",
+  "name": "AiSList",
+  "description": "Community list of YouTube channels that mainly publish AI-generated content",
+  "homepage": "https://aisloplist.com",
+  "repo": "Override92/AiSList",
+  "branch": "main",
+  "files": {
+    "block": "AiSList/aislist_blocklist.txt",
+    "warn": "AiSList/aislist_warnlist.txt"
+  },
+  "format": "aislist-txt",
+  "license": "CC BY-NC 4.0",
+  "guards": {
+    "min_block_entries": 40000,
+    "max_shrink_ratio": 0.02,
+    "max_growth_ratio": 0.25,
+    "max_reject_ratio": 0.01,
+    "max_header_mismatch_ratio": 0.01
+  }
+}

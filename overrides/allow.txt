@@ -1,0 +1,3 @@
+! Entries listed here are never published, in either list (false-positive fixes).
+! Same line format as the source lists: one @handle or UC... channel id per line.
+! Lines starting with ! or # are comments. Add a short reason above each entry.
