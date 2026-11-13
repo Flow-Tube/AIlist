@@ -3,15 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Not found</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.55 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
-</style>
+<title>Not found · Flow channel lists</title>
+<meta name="theme-color" content="#F7F6F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131211" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/svg+xml" href="/flow-icon.svg">
+<link rel="stylesheet" href="/site.css">
 </head>
 <body>
-<h1>Not found</h1>
-<p>This file does not exist. Older snapshots and deltas are removed once they leave the retention window.</p>
-<p><a href="/">Back to the start page</a></p>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/flow-icon.svg" alt="" width="30" height="30">Flow <span>channel lists</span></a>
+    <a class="toplink" href="https://flow-tube.org">flow-tube.org ↗</a>
+  </div>
+</header>
+
+<main class="notfound">
+  <div>
+    <span class="code">404 · NOT FOUND</span>
+    <h1>This file does not exist</h1>
+    <p>
+      Older snapshots and deltas are removed once they leave the retention window.
+      Read the current manifest to see which versions are still hosted.
+    </p>
+    <a class="button" href="/#api">API reference</a>
+  </div>
+</main>
+
 </body>
 </html>
