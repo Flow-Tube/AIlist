@@ -115,7 +115,7 @@ async function listVersions(dir) {
   return names.map((name) => VERSIONED_FILE_PATTERN.exec(name)).filter(Boolean).map((match) => Number(match[1]));
 }
 
-async function loadConfigs(dir) {
+export async function loadConfigs(dir) {
   const names = (await readdir(dir)).filter((name) => name.endsWith('.json')).sort();
   if (names.length === 0) throw new Error(`No source configs in ${dir}`);
   const configs = [];
@@ -137,7 +137,7 @@ async function loadConfigs(dir) {
 }
 
 /** Allow-list entries, normalized. An unreadable line is an error, never silently skipped. */
-async function loadAllow(file) {
+export async function loadAllow(file) {
   const text = (await readOptional(file))?.toString('utf8') ?? '';
   const parsed = getParser(ALLOW_FORMAT)(text, { commentPrefixes: ALLOW_COMMENT_PREFIXES });
   const normalized = normalizeEntries(parsed);
@@ -328,7 +328,7 @@ async function publish(options) {
     commit_message:
       changed.length > 0
         ? changed.map((p) => describeVersion(p.config.id, p.plan.version, p.plan.changes, p.commit)).join('; ')
-        : 'data(site): update static files and index',
+        : 'data(site): update site files without a new list version',
     lists: prepared.map(({ config, commit, plan }) => ({
       id: config.id,
       version: plan.version,
