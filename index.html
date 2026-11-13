@@ -4,35 +4,404 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flow channel lists</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.55 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
-  code { font-size: 0.95em; }
-</style>
+<meta name="description" content="Signed, versioned channel lists for the Flow apps. Mirrors AiSList under CC BY-NC 4.0.">
+<meta name="theme-color" content="#F7F6F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131211" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/svg+xml" href="/flow-icon.svg">
+<link rel="stylesheet" href="/site.css">
 </head>
 <body>
-<h1>Flow channel lists</h1>
-<p>
-  This site serves signed, versioned copies of community channel lists for the
-  Flow apps. Flow for Android and Flow Desktop check it about once a day, and
-  only while the user has the matching filter turned on.
-</p>
-<p>
-  There is no server behind it: a daily job builds static JSON files under
-  <code>/v1/</code>. The catalogue is at <a href="/v1/index.json"><code>/v1/index.json</code></a>.
-</p>
-<h2>Data source and licence</h2>
-<p>
-  The <code>aislist</code> list mirrors
-  <a href="https://aisloplist.com">AiSList</a>
-  (<a href="https://github.com/Override92/AiSList">Override92/AiSList</a>),
-  a community list of YouTube channels that mainly publish AI-generated content.
-  The data is licensed under
-  <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>
-  and must not be used commercially.
-</p>
-<p>
-  Code and file formats: <a href="https://github.com/Flow-Tube/AIlist">Flow-Tube/AIlist</a>.
-</p>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/flow-icon.svg" alt="" width="30" height="30">Flow <span>channel lists</span></a>
+    <a class="toplink" href="https://flow-tube.org">flow-tube.org ↗</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">Public API · v1</span>
+    <h1>Signed channel lists for Flow</h1>
+    <p class="lead">
+      Static, versioned copies of community channel lists that Flow for Android and
+      Flow Desktop download about once a day, and only while the matching filter is on.
+      No accounts, no tracking, no server: just signed JSON files on a CDN.
+    </p>
+  </div>
+
+  <section aria-labelledby="status-title">
+    <h2 id="status-title">Live status</h2>
+    <div class="card">
+      <div class="status-head">
+        <div class="status-title">AiSList <span class="badge" id="s-version">v–</span></div>
+        <span class="live" id="s-live" data-state="loading">Checking…</span>
+      </div>
+      <dl class="stats">
+        <div class="stat"><dt>Blocked channels</dt><dd id="s-block">–</dd></div>
+        <div class="stat"><dt>Warned channels</dt><dd id="s-warn">–</dd></div>
+        <div class="stat"><dt>Last update</dt><dd class="small" id="s-updated">–</dd></div>
+        <div class="stat"><dt>Source commit</dt><dd class="small" id="s-commit">–</dd></div>
+      </dl>
+      <div class="status-links">
+        <a href="/v1/aislist/manifest.json">manifest.json</a>
+        <a href="/v1/index.json">index.json</a>
+        <a href="https://aisloplist.com">aisloplist.com ↗</a>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="how-title">
+    <h2 id="how-title">How it works</h2>
+    <div class="features">
+      <div class="card feature">
+        <span class="num">01 · Signed</span>
+        <h3>Verified before it is used</h3>
+        <p>An Ed25519-signed manifest carries the SHA-256 of every file, so a compromised host or domain cannot push a fake list.</p>
+      </div>
+      <div class="card feature">
+        <span class="num">02 · Versioned</span>
+        <h3>Small daily updates</h3>
+        <p>Snapshots never change once published. Clients that are up to date fetch a daily delta of a few kilobytes instead of the full list.</p>
+      </div>
+      <div class="card feature">
+        <span class="num">03 · Private</span>
+        <h3>Nothing to log</h3>
+        <p>Requests carry no identifiers or query parameters, and the apps make none at all while the filter is off.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="api" aria-labelledby="api-title">
+    <h2 id="api-title">API reference</h2>
+    <div class="docs">
+      <nav class="docs-nav" aria-label="API reference">
+        <span class="group">Basics</span>
+        <a href="#overview">Overview</a>
+        <a href="#behaviour">Common behaviour</a>
+        <span class="group">Endpoints</span>
+        <a href="#ep-index">List catalogue</a>
+        <a href="#ep-manifest">Manifest</a>
+        <a href="#ep-snapshot">Snapshot</a>
+        <a href="#ep-delta">Delta</a>
+        <span class="group">Guides</span>
+        <a href="#verify">Verify a manifest</a>
+        <a href="#update">Keep a copy current</a>
+        <a href="#match">Match a channel</a>
+      </nav>
+
+      <div class="docs-body">
+
+        <div class="card endpoint" id="overview">
+          <h3>Overview</h3>
+          <p>
+            Every file is a static JSON document under one base URL. There are no keys, no sign-up and
+            no write endpoints. Each list lives in its own folder, <code>/v1/&lt;list&gt;/</code>; today
+            there is one list, <code>aislist</code>.
+          </p>
+          <dl class="meta">
+            <dt>Base URL</dt><dd><code>https://ailist.flow-tube.org</code></dd>
+            <dt>Format</dt><dd>Minified UTF-8 JSON, no BOM, non-ASCII written raw</dd>
+            <dt>Auth</dt><dd>None</dd>
+            <dt>Updates</dt><dd>Once a day around 03:17 UTC, only when the list changed</dd>
+          </dl>
+          <div class="code-label">Try it <button class="copy" type="button">Copy</button></div>
+          <pre><code>curl -s https://ailist.flow-tube.org/v1/index.json</code></pre>
+        </div>
+
+        <div class="card endpoint" id="behaviour">
+          <h3>Common behaviour</h3>
+          <ul class="params">
+            <li><code>200</code> with <code>Content-Type: application/json</code> for every published file.</li>
+            <li><code>404</code> for anything that does not exist, including snapshots and deltas that have left the retention window.</li>
+            <li><code>Access-Control-Allow-Origin: *</code> on everything under <code>/v1/</code>, so browsers can read it directly.</li>
+            <li>Responses are compressed by the CDN. Hashes in the manifest are over the uncompressed bytes.</li>
+            <li>Clients must ignore unknown fields. A breaking change would ship under <code>/v2/</code>, with <code>/v1/</code> kept running.</li>
+          </ul>
+        </div>
+
+        <div class="card endpoint" id="ep-index">
+          <h3>List catalogue</h3>
+          <div class="route"><span class="method">GET</span><span class="path">/v1/index.json</span></div>
+          <p>Unsigned, informational list of every available list and where its manifest lives.</p>
+          <dl class="meta">
+            <dt>Cache</dt><dd><code>public, max-age=3600</code></dd>
+            <dt>Signed</dt><dd>No. Trust a list only through its signed manifest.</dd>
+          </dl>
+          <details>
+            <summary>Example response</summary>
+            <pre><code>{
+  "schema": 1,
+  "lists": [
+    {
+      "id": "aislist",
+      "name": "AiSList",
+      "description": "Community list of YouTube channels that mainly publish AI-generated content",
+      "manifest": "aislist/manifest.json",
+      "homepage": "https://aisloplist.com",
+      "license": "CC BY-NC 4.0"
+    }
+  ]
+}</code></pre>
+          </details>
+        </div>
+
+        <div class="card endpoint" id="ep-manifest">
+          <h3>Manifest</h3>
+          <div class="route"><span class="method">GET</span><span class="path">/v1/<span class="param">{list}</span>/manifest.json</span></div>
+          <p>
+            The only file clients poll. A signed envelope whose payload names the current version and
+            the size and SHA-256 of every snapshot and delta still hosted.
+          </p>
+          <dl class="meta">
+            <dt>Cache</dt><dd><code>public, max-age=3600</code> with an <code>ETag</code></dd>
+            <dt>Conditional</dt><dd>Send <code>If-None-Match</code>; an unchanged manifest answers <code>304</code> with no body</dd>
+            <dt>Signature</dt><dd>Ed25519 over the exact decoded <code>payload</code> bytes</dd>
+          </dl>
+          <div class="code-label">Envelope</div>
+          <pre><code>{
+  "key_id": "2026-11",
+  "payload": "&lt;base64 of the payload JSON bytes&gt;",
+  "sig": "&lt;base64 of the 64-byte Ed25519 signature&gt;"
+}</code></pre>
+          <details>
+            <summary>Decoded payload</summary>
+            <pre><code>{
+  "schema": 1,
+  "list": "aislist",
+  "version": 42,
+  "generated_at": "2026-11-13T03:17:00Z",
+  "snapshot": { "path": "snapshot/42.json", "sha256": "&lt;hex&gt;", "bytes": 1094967 },
+  "deltas": [
+    { "to": 42, "path": "delta/42.json", "sha256": "&lt;hex&gt;", "bytes": 35313 },
+    { "to": 41, "path": "delta/41.json", "sha256": "&lt;hex&gt;", "bytes": 20110 }
+  ],
+  "max_delta_chain": 14,
+  "counts": { "block_handles": 60212, "block_ids": 0, "warn_handles": 1262, "warn_ids": 0 },
+  "source": {
+    "name": "AiSList",
+    "homepage": "https://aisloplist.com",
+    "repo": "https://github.com/Override92/AiSList",
+    "commit": "&lt;full source commit sha&gt;",
+    "license": "CC BY-NC 4.0"
+  }
+}</code></pre>
+          </details>
+          <ul class="params" style="margin-top:14px">
+            <li><code>path</code> Relative to the manifest's folder.</li>
+            <li><code>deltas</code> Every delta still hosted, newest first. Version 1 has none.</li>
+            <li><code>max_delta_chain</code> Most deltas to chain before taking the snapshot instead.</li>
+          </ul>
+        </div>
+
+        <div class="card endpoint" id="ep-snapshot">
+          <h3>Snapshot</h3>
+          <div class="route"><span class="method">GET</span><span class="path">/v1/<span class="param">{list}</span>/snapshot/<span class="param">{version}</span>.json</span></div>
+          <p>The full list at one version. Never changes once published; the newest 3 are kept.</p>
+          <dl class="meta">
+            <dt>Cache</dt><dd><code>public, max-age=31536000, immutable</code></dd>
+            <dt>Size</dt><dd>About 1.1 MB, about 410 KB compressed</dd>
+          </dl>
+          <details>
+            <summary>Example response</summary>
+            <pre><code>{
+  "schema": 1,
+  "list": "aislist",
+  "version": 42,
+  "block": { "handles": ["another-one", "somechannel"], "ids": [] },
+  "warn":  { "handles": ["maybechannel"], "ids": [] }
+}</code></pre>
+          </details>
+          <ul class="params" style="margin-top:14px">
+            <li><code>handles</code> Normalized (see <a href="#match">Match a channel</a>), without <code>@</code>, deduplicated and sorted.</li>
+            <li><code>ids</code> Channel IDs matching <code>^UC[A-Za-z0-9_-]{22}$</code>. Empty for now; check them anyway.</li>
+            <li>An entry in <code>block</code> never also appears in <code>warn</code>.</li>
+          </ul>
+        </div>
+
+        <div class="card endpoint" id="ep-delta">
+          <h3>Delta</h3>
+          <div class="route"><span class="method">GET</span><span class="path">/v1/<span class="param">{list}</span>/delta/<span class="param">{version}</span>.json</span></div>
+          <p>Changes from <code>version - 1</code> to <code>version</code>. Never changes once published; the newest 30 are kept.</p>
+          <dl class="meta">
+            <dt>Cache</dt><dd><code>public, max-age=31536000, immutable</code></dd>
+            <dt>Size</dt><dd>Usually a few tens of kilobytes</dd>
+          </dl>
+          <details>
+            <summary>Example response</summary>
+            <pre><code>{
+  "schema": 1,
+  "list": "aislist",
+  "from": 41,
+  "to": 42,
+  "block": { "handles": { "add": ["newchannel"], "remove": [] }, "ids": { "add": [], "remove": [] } },
+  "warn":  { "handles": { "add": [], "remove": ["newchannel"] }, "ids": { "add": [], "remove": [] } }
+}</code></pre>
+          </details>
+          <p style="margin:14px 0 0">Apply removes first, then adds, as plain set operations. Applying a delta twice is harmless.</p>
+        </div>
+
+        <div class="card endpoint" id="verify">
+          <h3>Verify a manifest</h3>
+          <p>Decode, verify, and only then parse. An unknown <code>key_id</code> or a failed check means: keep what you have.</p>
+          <div class="keybox">
+            <span>Current public key, <code>key_id</code> <code>2026-11</code>, raw 32 bytes in base64:</span>
+            <code>xak9y4JaDG+UjKfl7cDwiaJs+7FjrOM+urMW1YfSuc0=</code>
+          </div>
+          <div class="code-label">Node.js 18+ <button class="copy" type="button">Copy</button></div>
+          <pre><code>import { createPublicKey, verify } from 'node:crypto';
+
+const KEYS = { '2026-11': 'xak9y4JaDG+UjKfl7cDwiaJs+7FjrOM+urMW1YfSuc0=' };
+const BASE = 'https://ailist.flow-tube.org/v1/aislist/';
+
+const envelope = await (await fetch(BASE + 'manifest.json')).json();
+const raw = KEYS[envelope.key_id];
+if (!raw) throw new Error('unknown key_id');
+
+const key = createPublicKey({
+  key: { kty: 'OKP', crv: 'Ed25519', x: Buffer.from(raw, 'base64').toString('base64url') },
+  format: 'jwk',
+});
+const payload = Buffer.from(envelope.payload, 'base64');
+const sig = Buffer.from(envelope.sig, 'base64');
+if (!verify(null, payload, key, sig)) throw new Error('bad signature');
+
+const manifest = JSON.parse(payload);   // parse only after verifying
+console.log(manifest.version, manifest.counts);</code></pre>
+          <p style="margin:14px 0 0">Also refuse a manifest whose <code>list</code> is not the one you asked for, or whose <code>version</code> is lower than the one you hold.</p>
+        </div>
+
+        <div class="card endpoint" id="update">
+          <h3>Keep a copy current</h3>
+          <p>Store the version, the <code>ETag</code> and the four sets. About once a day:</p>
+          <ol class="steps">
+            <li>Fetch the manifest with <code>If-None-Match</code>. On <code>304</code>, stop.</li>
+            <li>Verify it. Stop if <code>schema</code> is above 1, <code>list</code> is wrong, or <code>version</code> is not newer.</li>
+            <li>If you hold a list, are at most <code>max_delta_chain</code> versions behind, and every delta in between is listed, fetch those deltas. Otherwise fetch the snapshot.</li>
+            <li>Check each file's SHA-256 against the manifest before using it.</li>
+            <li>Apply deltas in version order, write the result to a temporary file, then rename it into place.</li>
+            <li>If a delta is missing or fails its hash, fall back to the snapshot once.</li>
+          </ol>
+          <p style="margin:14px 0 0">Any failure leaves the stored list exactly as it was. A failed update never clears the list.</p>
+        </div>
+
+        <div class="card endpoint" id="match">
+          <h3>Match a channel</h3>
+          <p>
+            A channel is listed when its normalized handle is in <code>handles</code> or its channel ID is in
+            <code>ids</code>. Match by exact equality against a set, never by prefix: a listed
+            <code>@drew</code> must not hide <code>@drewbinsky</code>.
+          </p>
+          <div class="code-label">Handle normalization <button class="copy" type="button">Copy</button></div>
+          <pre><code>function normalizeHandle(input) {
+  let s = input.trim();
+  const at = s.startsWith('@') ? 0 : s.indexOf('/@') + 1;
+  if (s[at] === '@') s = s.slice(at + 1).split(/[/?#]/)[0];
+  try { s = decodeURIComponent(s); } catch {}
+  s = s.normalize('NFC').toLowerCase();
+  if (!s || [...s].length &gt; 64 || /[\s/%?#@]/.test(s)) return null;
+  return s;
+}
+
+normalizeHandle('/@LinusTechTips/shorts');   // 'linustechtips'
+normalizeHandle('@DPCartoon%C3%80i-v6k');    // 'dpcartoonài-v6k'
+normalizeHandle('@Bad%ZZname');              // null (rejected)</code></pre>
+          <p style="margin:14px 0 0">Length counts code points. Kotlin and Rust ports must use locale-independent lowercasing and give the same results.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="licence-title">
+    <h2 id="licence-title">Data and licence</h2>
+    <div class="card licence">
+      <span class="mark">CC BY-NC</span>
+      <div>
+        <p>
+          The <strong>aislist</strong> list mirrors <a href="https://aisloplist.com">AiSList</a>
+          (<a href="https://github.com/Override92/AiSList">Override92/AiSList</a>), a community list of
+          YouTube channels that mainly publish AI-generated content.
+        </p>
+        <p>
+          The data is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>.
+          Credit AiSList wherever you show it, and do not use it commercially.
+        </p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Flow channel lists</span>
+    <nav>
+      <a href="https://github.com/Flow-Tube/AIlist">Source</a>
+      <a href="/v1/index.json">index.json</a>
+      <a href="https://flow-tube.org">Flow</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const number = new Intl.NumberFormat('en-US');
+
+  function relative(date) {
+    const minutes = Math.round((date - Date.now()) / 60000);
+    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+    if (Math.abs(minutes) < 60) return rtf.format(minutes, 'minute');
+    const hours = Math.round(minutes / 60);
+    if (Math.abs(hours) < 48) return rtf.format(hours, 'hour');
+    return rtf.format(Math.round(hours / 24), 'day');
+  }
+
+  function decodePayload(base64) {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  fetch('/v1/aislist/manifest.json', { cache: 'no-cache' })
+    .then((response) => {
+      if (!response.ok) throw new Error(response.status);
+      return response.json();
+    })
+    .then((envelope) => {
+      const m = decodePayload(envelope.payload);
+      const updated = new Date(m.generated_at);
+      $('s-version').textContent = `v${m.version}`;
+      $('s-block').textContent = number.format(m.counts.block_handles + m.counts.block_ids);
+      $('s-warn').textContent = number.format(m.counts.warn_handles + m.counts.warn_ids);
+      $('s-updated').textContent = relative(updated);
+      $('s-updated').title = updated.toUTCString();
+      const commit = document.createElement('a');
+      commit.href = `${m.source.repo}/commit/${m.source.commit}`;
+      commit.textContent = m.source.commit.slice(0, 7);
+      $('s-commit').replaceChildren(commit);
+      $('s-live').textContent = 'Serving';
+      $('s-live').dataset.state = 'ok';
+    })
+    .catch(() => {
+      $('s-live').textContent = 'Status unavailable';
+      $('s-live').dataset.state = 'error';
+    });
+
+  for (const button of document.querySelectorAll('.copy')) {
+    button.addEventListener('click', async () => {
+      const code = button.closest('.code-label').nextElementSibling.innerText;
+      try {
+        await navigator.clipboard.writeText(code);
+        button.textContent = 'Copied';
+      } catch {
+        button.textContent = 'Press ⌘C';
+      }
+      setTimeout(() => { button.textContent = 'Copy'; }, 1600);
+    });
+  }
+})();
+</script>
 </body>
 </html>
