@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow channel lists</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.55 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+  code { font-size: 0.95em; }
+</style>
+</head>
+<body>
+<h1>Flow channel lists</h1>
+<p>
+  This site serves signed, versioned copies of community channel lists for the
+  Flow apps. Flow for Android and Flow Desktop check it about once a day, and
+  only while the user has the matching filter turned on.
+</p>
+<p>
+  There is no server behind it: a daily job builds static JSON files under
+  <code>/v1/</code>. The catalogue is at <a href="/v1/index.json"><code>/v1/index.json</code></a>.
+</p>
+<h2>Data source and licence</h2>
+<p>
+  The <code>aislist</code> list mirrors
+  <a href="https://aisloplist.com">AiSList</a>
+  (<a href="https://github.com/Override92/AiSList">Override92/AiSList</a>),
+  a community list of YouTube channels that mainly publish AI-generated content.
+  The data is licensed under
+  <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>
+  and must not be used commercially.
+</p>
+<p>
+  Code and file formats: <a href="https://github.com/Flow-Tube/AIlist">Flow-Tube/AIlist</a>.
+</p>
+</body>
+</html>

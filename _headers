@@ -1,0 +1,15 @@
+/v1/*
+  Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+
+/v1/index.json
+  Cache-Control: public, max-age=3600
+
+/v1/:list/manifest.json
+  Cache-Control: public, max-age=3600
+
+/v1/:list/snapshot/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/v1/:list/delta/*
+  Cache-Control: public, max-age=31536000, immutable
