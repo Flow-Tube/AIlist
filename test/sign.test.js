@@ -87,6 +87,14 @@ test('non-Ed25519 signing keys are refused', async () => {
 
 test('readEnvelopeUnverified decodes without a key', () => {
   const envelope = signEnvelope(payloadBytes, privateKey, KEY_ID);
-  assert.equal(readEnvelopeUnverified(envelope).version, 42);
+  const { payload, payloadBytes: bytes } = readEnvelopeUnverified(envelope);
+  assert.equal(payload.version, 42);
+  assert.deepEqual(bytes, payloadBytes);
   assert.throws(() => readEnvelopeUnverified({}), /base64/);
+});
+
+test('signing the same payload bytes with the same key gives the same envelope', () => {
+  const first = JSON.stringify(signEnvelope(payloadBytes, privateKey, KEY_ID));
+  const again = JSON.stringify(signEnvelope(Buffer.from(payloadBytes), privateKey, KEY_ID));
+  assert.equal(again, first);
 });

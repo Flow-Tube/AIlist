@@ -59,11 +59,12 @@ export function openEnvelope(envelope, publicKeys) {
 /**
  * Read an envelope's payload without verifying it. Only for the publisher's own
  * previous tree, which may have been signed by a different (throwaway) key.
+ * Returns { payloadBytes, payload }.
  */
 export function readEnvelopeUnverified(envelope) {
   const payloadBytes = decodeBase64(envelope?.payload);
   if (payloadBytes === null) throw new Error('manifest payload is not standard base64');
-  return JSON.parse(payloadBytes.toString('utf8'));
+  return { payloadBytes, payload: JSON.parse(payloadBytes.toString('utf8')) };
 }
 
 /** A fresh in-memory Ed25519 key pair for tests and dry runs. Never written to disk. */
