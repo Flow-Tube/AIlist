@@ -1,0 +1,13 @@
+! Title: fixture blocklist v4 shrunk
+! Format: One channel per line
+!
+! Total Channels: 8
+! Entries:
+@ChickofHonor-l
+@HFY_en_Español
+@ELTÍOFRONTAL
+@SomeChannel
+@Dup-Case
+@Mover
+@NewOne
+@NewTwo

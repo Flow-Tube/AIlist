@@ -1,0 +1,21 @@
+! Title: fixture blocklist v1
+! Format: One channel per line
+!
+! Total Channels: 16
+! Entries:
+@ChickofHonor-l
+@DPCartoon%C3%80i-v6k
+@HFY_en_Español
+@소소한작업실-z8d
+@ELTÍOFRONTAL
+@M%C3%BAsicaB%C3%ADblicaInstrumental
+@Aiomo%E3%81%82%E3%81%84%E3%81%8A%E3%82%82
+@drew
+@SomeChannel
+@somechannel
+@Another.One_2
+@Dup-Case
+@DUP-CASE
+@Mover
+@AllowedFalsePositive
+UCabcdefghijklmnopqrstuv

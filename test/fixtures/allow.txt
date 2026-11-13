@@ -1,0 +1,2 @@
+# Fixture override: a false positive that must never be published.
+@AllowedFalsePositive

@@ -1,0 +1,9 @@
+! Title: fixture warnlist v1
+! Format: One channel per line
+!
+! Total Channels: 4
+! Entries:
+@MaybeChannel
+@Mover
+@Warn-Two
+@Warn-Three
