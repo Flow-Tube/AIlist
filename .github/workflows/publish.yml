@@ -1,0 +1,106 @@
+name: publish
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Skip only the shrink and growth guards (after a human look at the publish-blocked issue)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  SITE_URL: https://ailist.flow-tube.org
+  PAGES_PROJECT: flow-ailist
+  WRANGLER_VERSION: 4.156.0
+  DATA_BRANCH: data
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check out the data branch into site/
+        run: |
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" > /dev/null; then
+            git fetch --no-tags --depth=1 origin "$DATA_BRANCH"
+            git worktree add -B "$DATA_BRANCH" site FETCH_HEAD
+          else
+            echo "No $DATA_BRANCH branch yet: starting from an empty tree."
+            git worktree add --orphan -b "$DATA_BRANCH" site
+          fi
+
+      - name: Build, sign and self-check
+        env:
+          AILIST_SIGNING_KEY: ${{ secrets.AILIST_SIGNING_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          FORCE_FLAG: ${{ inputs.force && '--force' || '' }}
+        run: |
+          node src/publish.js --out site \
+            --summary "$RUNNER_TEMP/summary.json" \
+            --report "$RUNNER_TEMP/guard-report.md" \
+            $FORCE_FLAG
+
+      - name: Open or update the publish-blocked issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report="$RUNNER_TEMP/guard-report.md"
+          if [ ! -f "$report" ]; then
+            echo "No guard report: the run failed for another reason."
+            exit 0
+          fi
+          printf '\nRun: %s\n' "$RUN_URL" >> "$report"
+          gh label create publish-blocked --color B60205 \
+            --description 'A publish guard stopped the daily run' 2> /dev/null || true
+          number=$(gh issue list --label publish-blocked --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$report"
+          else
+            gh issue create --title 'Publish blocked by a guard' --label publish-blocked --body-file "$report"
+          fi
+
+      - name: Commit and push the data branch
+        run: |
+          cd site
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Tree unchanged: nothing to commit."
+            exit 0
+          fi
+          message=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).commit_message)' "$RUNNER_TEMP/summary.json")
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet -m "$message"
+          git push origin "HEAD:refs/heads/$DATA_BRANCH"
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes "wrangler@$WRANGLER_VERSION" pages deploy site --project-name="$PAGES_PROJECT" --branch=main
+
+      - name: Smoke-test the live site
+        run: node src/publish.js --smoke "$SITE_URL" --out site
