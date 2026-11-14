@@ -1,0 +1,102 @@
+name: Bug report
+description: Report a problem with the published files, signatures, the site or the publish workflow.
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the Flow channel lists. A channel that is listed or missing is not a bug here: use the links on the previous page or the "Channel wrongly listed" form instead.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues for this problem.
+          required: true
+        - label: I checked the current manifest at https://ailist.flow-tube.org and the problem still happens.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - manifest.json
+        - Snapshot files
+        - Delta files
+        - index.json
+        - Signature verification
+        - HTTP headers or caching
+        - Website or API reference
+        - Publish workflow or guards
+        - README or client contract
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: URL
+      description: The exact URL you requested.
+      placeholder: "https://ailist.flow-tube.org/v1/aislist/manifest.json"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: List version
+      description: The `version` from the manifest payload when you saw the problem, if you know it.
+      placeholder: "2"
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options:
+        - Flow for Android
+        - Flow Desktop
+        - My own client
+        - Browser or curl
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: The smallest sequence that shows the problem. A curl command is ideal.
+      render: shell
+      placeholder: |
+        curl -sSI https://ailist.flow-tube.org/v1/aislist/manifest.json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Point to the README section that describes the expected result when you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the response status, headers or error message.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Client version, network conditions, proxy or VPN details, and when it last worked.

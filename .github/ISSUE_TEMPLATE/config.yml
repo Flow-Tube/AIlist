@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a channel that posts AI-generated content
+    url: https://github.com/Override92/AiSList/issues/new?template=report-ai-channel.md
+    about: Channels are added upstream in AiSList. Flow picks up the change on its next daily publish.
+  - name: Ask AiSList to remove a channel
+    url: https://github.com/Override92/AiSList/issues/new?template=removal-request.md
+    about: Removals start upstream. Use the "Channel wrongly listed" form here only if Flow should exclude it too.
+  - name: Problem in the Flow Android app
+    url: https://github.com/Flow-Tube/Flow/issues/new/choose
+    about: Filtering, settings or labels inside the Android app.
+  - name: Problem in Flow Desktop
+    url: https://github.com/Flow-Tube/Flow-Desktop/issues/new/choose
+    about: Filtering, settings or labels inside the desktop app.
+  - name: Security vulnerability
+    url: https://github.com/Flow-Tube/AIlist/security/advisories/new
+    about: Privately report vulnerabilities. Do not disclose security issues in a public issue.

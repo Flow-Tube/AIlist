@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a new list source, endpoint, or change to the published format or pipeline.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first. Requests for features inside the Flow apps belong in the [Flow](https://github.com/Flow-Tube/Flow) or [Flow Desktop](https://github.com/Flow-Tube/Flow-Desktop) repositories.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and what gets in the way today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: The files, fields or workflow steps you would add or change.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contract
+    attributes:
+      label: Client impact
+      description: See "Compatibility rules" in the README.
+      options:
+        - No change to the published files
+        - Adds optional fields or files that existing clients can ignore
+        - Changes the meaning of existing fields (needs a new /v2/ path)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
