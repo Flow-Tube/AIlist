@@ -1,0 +1,53 @@
+name: Channel wrongly listed
+description: Ask for a channel to be excluded from Flow's copy of the list.
+title: "[False positive]: "
+labels:
+  - false-positive
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Flow mirrors [AiSList](https://github.com/Override92/AiSList), so a removal request there is the first step and fixes the list for everyone. Use this form when Flow should also exclude the channel through `overrides/allow.txt`. Accepted entries are removed from both lists on the next daily publish.
+
+  - type: input
+    id: channel
+    attributes:
+      label: Channel
+      description: The @handle, channel URL, or UC... channel ID.
+      placeholder: "@examplechannel"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: list
+    attributes:
+      label: List
+      options:
+        - Block list
+        - Warn list
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: upstream
+    attributes:
+      label: AiSList removal request
+      description: Link to the upstream issue, if you opened one.
+      placeholder: "https://github.com/Override92/AiSList/issues/..."
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Why the channel should not be listed
+      description: Explain why its content is not mainly AI-generated. Links to specific videos help.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: relation
+    attributes:
+      label: Disclosure
+      options:
+        - label: I own or work with this channel.

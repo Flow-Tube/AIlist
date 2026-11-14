@@ -1,0 +1,13 @@
+# Default owner for everything in the repository.
+* @A-EDev
+
+# Signing keys, list sources and the publish workflow decide what every Flow app trusts.
+/keys/                @A-EDev
+/sources/             @A-EDev
+/overrides/           @A-EDev
+/.github/workflows/   @A-EDev
+/.github/dependabot.yml @A-EDev
+
+# Project policy documents.
+/CONTRIBUTING.md      @A-EDev
+/SECURITY.md          @A-EDev
