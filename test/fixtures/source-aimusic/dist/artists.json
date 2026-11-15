@@ -1,0 +1,37 @@
+[
+ {
+  "id": "alpha",
+  "name": "Alpha Wave",
+  "removed": false,
+  "spotify": "aaaaaaaaaaaaaaaaaaaaaa",
+  "youtube": "UCalphaOwnChannelAAAAAAA"
+ },
+ {
+  "id": "beta",
+  "name": "Beta Dreams",
+  "removed": false,
+  "spotify": "bbbbbbbbbbbbbbbbbbbbbb",
+  "youtube": null
+ },
+ {
+  "id": "gone",
+  "name": "Gone Artist",
+  "removed": true,
+  "spotify": "gggggggggggggggggggggg",
+  "youtube": "UCgoneAAAAAAAAAAAAAAAAAA"
+ },
+ {
+  "id": "nospotify",
+  "name": "Lonely Synth",
+  "removed": false,
+  "spotify": null,
+  "youtube": null
+ },
+ {
+  "id": "broken",
+  "name": "",
+  "removed": false,
+  "spotify": null,
+  "youtube": null
+ }
+]

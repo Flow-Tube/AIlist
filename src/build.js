@@ -151,7 +151,7 @@ export const formatTimestamp = (date) => date.toISOString().replace(/\.\d{3}Z$/,
  * `changes` is the diff against the previous lists (or against empty lists on
  * the first run) and is meant for reporting.
  */
-export function planRelease({ config, previous, existing, lists, commit, generatedAt }) {
+export function planRelease({ config, previous, existing, lists, commit, provenance, generatedAt }) {
   const listId = config.id;
   const changes = diffLists(previous ? previous.lists : emptyLists(), lists);
   if (previous && isEmptyDiff(changes)) {
@@ -188,13 +188,15 @@ export function planRelease({ config, previous, existing, lists, commit, generat
     deltas,
     max_delta_chain: MAX_DELTA_CHAIN,
     counts: countEntries(lists),
-    source: {
-      name: config.name,
-      homepage: config.homepage,
-      repo: `${GITHUB_WEB}/${config.repo}`,
-      commit,
-      license: config.license,
-    },
+    ...(provenance ?? {
+      source: {
+        name: config.name,
+        homepage: config.homepage,
+        repo: `${GITHUB_WEB}/${config.repo}`,
+        commit,
+        license: config.license,
+      },
+    }),
   };
 
   return { changed: true, version, changes, writes, deletes, payload };

@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 import {
   KEY_ID,
   KINDS,
+  GITHUB_WEB,
   ALLOW_FORMAT,
   ALLOW_COMMENT_PREFIXES,
   DEFAULT_PATHS,
@@ -38,15 +39,17 @@ import { signEnvelope, readEnvelopeUnverified, generateThrowawayKey } from './si
 import { verifyTree, checkLiveHeaders } from './verify-tree.js';
 import { downloadSource, createHttpReader } from './fetch.js';
 import { parseCache, serializeCache, pruneCache, planLookups, mergeResults, cachedIds, isoDay } from './resolve-cache.js';
-import { resolveHandle, runLookups } from './resolve.js';
+import { resolveHandle, searchArtist, runLookups } from './resolve.js';
 
 const SIGNING_KEY_ENV = 'AILIST_SIGNING_KEY';
 const GITHUB_TOKEN_ENV = 'GITHUB_TOKEN';
 const SMOKE_ATTEMPTS = 5;
 const SMOKE_DELAY_MS = 30_000;
 const PLACEHOLDER_COMMIT = '0'.repeat(40);
-const REQUIRED_CONFIG_FIELDS = ['id', 'name', 'description', 'homepage', 'repo', 'branch', 'files', 'format', 'license', 'guards'];
+const LIST_FIELDS = ['id', 'name', 'description', 'homepage', 'license', 'guards'];
+const INPUT_FIELDS = ['name', 'homepage', 'repo', 'branch', 'files', 'format', 'license'];
 const RESOLVE_LIMITS = ['daily_budget', 'recheck_found_days', 'recheck_missing_days', 'max_minutes'];
+const LOOKUPS = Object.freeze(['handle', 'artist-name']);
 
 const CLI_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
@@ -131,14 +134,23 @@ export async function loadConfigs(dir) {
   for (const name of names) {
     const config = JSON.parse(await readFile(path.join(dir, name), 'utf8'));
     const where = path.join(dir, name);
-    for (const field of REQUIRED_CONFIG_FIELDS) {
+    for (const field of LIST_FIELDS) {
       if (config[field] === undefined) throw new Error(`${where}: missing "${field}"`);
     }
     if (`${config.id}.json` !== name) throw new Error(`${where}: id "${config.id}" does not match the file name`);
-    for (const kind of KINDS) {
-      if (typeof config.files[kind] !== 'string') throw new Error(`${where}: files.${kind} is missing`);
+    if (config.inputs !== undefined && (!Array.isArray(config.inputs) || config.inputs.length === 0)) {
+      throw new Error(`${where}: inputs must be a non-empty array`);
     }
-    getParser(config.format);
+    for (const [i, input] of inputsOf(config).entries()) {
+      const at = config.inputs ? `${where}: inputs[${i}]` : where;
+      for (const field of INPUT_FIELDS) {
+        if (input[field] === undefined) throw new Error(`${at}: missing "${field}"`);
+      }
+      if (typeof input.files.block !== 'string') throw new Error(`${at}: files.block is missing`);
+      if (!config.inputs && typeof input.files.warn !== 'string') throw new Error(`${at}: files.warn is missing`);
+      if (input.files.warn !== undefined && typeof input.files.warn !== 'string') throw new Error(`${at}: files.warn is not a path`);
+      getParser(input.format);
+    }
     validateLimits(config.guards);
     if (config.resolve !== undefined) validateResolve(config.resolve, where);
     configs.push(config);
@@ -150,6 +162,22 @@ function validateResolve(resolve, where) {
   for (const key of RESOLVE_LIMITS) {
     if (!Number.isInteger(resolve?.[key]) || resolve[key] < 0) throw new Error(`${where}: resolve.${key} must be a non-negative integer`);
   }
+  const lookup = resolve.lookup ?? 'handle';
+  if (!LOOKUPS.includes(lookup)) throw new Error(`${where}: resolve.lookup must be one of ${LOOKUPS.join(', ')}`);
+  if (lookup === 'artist-name' && (!Number.isInteger(resolve.max_audience) || resolve.max_audience < 0)) {
+    throw new Error(`${where}: resolve.max_audience must be a non-negative integer for artist-name lookups`);
+  }
+}
+
+/**
+ * The upstream sources of a list. A single-source config names its repo and
+ * files at the top level; a compiled list names several under `inputs`, each
+ * with its own repo, files (block, optionally warn), format and licence.
+ */
+export function inputsOf(config) {
+  if (config.inputs) return config.inputs;
+  const { id, name, homepage, repo, branch, files, format, license } = config;
+  return [{ id, name, homepage, repo, branch, files, format, license }];
 }
 
 /** Allow-list entries, normalized. An unreadable line is an error, never silently skipped. */
@@ -201,32 +229,76 @@ async function readPrevious(out, listId) {
   return { payload, payloadBytes, lists: snapshotLists(snapshot) };
 }
 
-/** Step 2: the source texts and the commit they came from. */
-async function acquireSource(config, options) {
-  if (!options['source-dir']) return downloadSource(config, { token: process.env[GITHUB_TOKEN_ENV] });
-  const texts = {};
-  for (const kind of KINDS) texts[kind] = await readFile(path.join(options['source-dir'], config.files[kind]), 'utf8');
-  return { commit: options['source-commit'], texts };
+/** Step 2: for each input, the source texts per list kind and the commit they came from. */
+async function acquireInputs(config, options) {
+  const acquired = [];
+  for (const input of inputsOf(config)) {
+    if (!options['source-dir']) {
+      acquired.push({ input, ...(await downloadSource(input, { token: process.env[GITHUB_TOKEN_ENV] })) });
+      continue;
+    }
+    const texts = {};
+    for (const [kind, file] of Object.entries(input.files)) texts[kind] = await readFile(path.join(options['source-dir'], file), 'utf8');
+    acquired.push({ input, commit: options['source-commit'], texts });
+  }
+  return acquired;
+}
+
+const emptyParse = () => ({ handles: [], ids: [], names: [], rejected: [], entryLines: 0, declaredTotal: null });
+
+/** Merge the parse results of several inputs for one list kind. A header total only counts for a single input. */
+function mergeParsed(results) {
+  if (results.length === 1) return { names: [], ...results[0] };
+  const merged = emptyParse();
+  for (const result of results) {
+    merged.handles.push(...result.handles);
+    merged.ids.push(...result.ids);
+    merged.names.push(...(result.names ?? []));
+    merged.rejected.push(...result.rejected);
+    merged.entryLines += result.entryLines;
+  }
+  return merged;
+}
+
+/** The payload's provenance: `source` for a single input, `sources` for a compiled list. */
+function provenance(config, acquired) {
+  const describe = ({ input, commit }) => ({
+    name: input.name,
+    homepage: input.homepage,
+    repo: `${GITHUB_WEB}/${input.repo}`,
+    commit,
+    license: input.license,
+    ...(input.attribution ? { attribution: input.attribution } : {}),
+  });
+  return config.inputs ? { sources: acquired.map(describe) } : { source: describe(acquired[0]) };
 }
 
 // ---------------------------------------------------------------- id resolution
 
 const cachePath = (options, listId) => path.join(options.cache, `${listId}.tsv`);
 
-/** The lookup function for this run: a fixture file in tests, YouTube otherwise. */
-async function createLookup(options) {
-  if (!options['resolve-fixture']) return (handle) => resolveHandle(handle);
-  const answers = JSON.parse(await readFile(options['resolve-fixture'], 'utf8'));
-  return async (handle) => {
-    if (!Object.hasOwn(answers, handle)) throw new Error(`no fixture answer for ${handle}`);
-    return { id: answers[handle] };
-  };
+/**
+ * The lookup function for this run: a fixture file of { key: id or null } in
+ * tests, YouTube otherwise. `names` maps an artist-name key to the name to search.
+ */
+async function createLookup(config, options, names) {
+  if (options['resolve-fixture']) {
+    const answers = JSON.parse(await readFile(options['resolve-fixture'], 'utf8'));
+    return async (key) => {
+      if (!Object.hasOwn(answers, key)) throw new Error(`no fixture answer for ${key}`);
+      return { id: answers[key] };
+    };
+  }
+  if ((config.resolve.lookup ?? 'handle') === 'handle') return (handle) => resolveHandle(handle);
+  return (key) => searchArtist(names.get(key), { maxAudience: config.resolve.max_audience });
 }
 
 /**
- * Look up channel ids for the listed handles within the run's budget, and add
- * every id the cache knows to the same list kind as its handle. Allow-listed
- * handles are never looked up and never contribute an id.
+ * Look up YouTube ids within the run's budget and add every id the cache knows
+ * to the same list kind as its key. Keys are normalized handles (`lookup:
+ * handle`) or artist-name keys (`lookup: artist-name`). Allow-listed handles
+ * are never looked up and never contribute an id; allow-listed ids are dropped
+ * later with the rest.
  *
  * Returns { cache, prunedCache, lookupGrowth }. The caller saves the pruned
  * cache once the guards pass and the full one when they do not, so a bad source
@@ -236,18 +308,23 @@ async function createLookup(options) {
  * blocking every run after one aborted with lookups cached.
  */
 async function resolveListIds(config, { normalized, allow, previous, options }) {
+  const byHandle = (config.resolve.lookup ?? 'handle') === 'handle';
   const allowed = new Set(allow.handles);
-  const handlesByKind = Object.fromEntries(KINDS.map((kind) => [kind, [...normalized[kind].handles].filter((h) => !allowed.has(h))]));
-  const listed = [...new Set(KINDS.flatMap((kind) => handlesByKind[kind]))];
-  const previousHandles = new Set(previous ? KINDS.flatMap((kind) => previous.lists[kind].handles) : []);
+  const names = new Map(KINDS.flatMap((kind) => [...normalized[kind].names]));
+  const keysByKind = Object.fromEntries(
+    KINDS.map((kind) => [kind, byHandle ? [...normalized[kind].handles].filter((h) => !allowed.has(h)) : [...normalized[kind].names.keys()]]),
+  );
+  const listed = [...new Set(KINDS.flatMap((kind) => keysByKind[kind]))];
+  const previousHandles = new Set(byHandle && previous ? KINDS.flatMap((kind) => previous.lists[kind].handles) : []);
   const today = isoDay(new Date());
+  const what = byHandle ? 'handles' : 'artist names';
 
   let cache = parseCache((await readOptional(cachePath(options, config.id)))?.toString('utf8'));
   const budget = options['resolve-budget'] === undefined ? config.resolve.daily_budget : Number(options['resolve-budget']);
   if (!Number.isInteger(budget) || budget < 0) throw new Error('--resolve-budget must be a non-negative integer');
   const plan = planLookups({
     keys: listed,
-    priority: previous ? listed.filter((h) => !previousHandles.has(h)) : [],
+    priority: byHandle && previous ? listed.filter((h) => !previousHandles.has(h)) : [],
     cache,
     today,
     budget,
@@ -255,15 +332,18 @@ async function resolveListIds(config, { normalized, allow, previous, options }) 
     recheckMissingDays: config.resolve.recheck_missing_days,
   });
   if (plan.length > 0) {
-    const run = await runLookups(plan, await createLookup(options), {
+    const run = await runLookups(plan, await createLookup(config, options, names), {
       deadline: Date.now() + config.resolve.max_minutes * 60_000,
       spacingMs: options['resolve-fixture'] ? 0 : undefined,
     });
     cache = mergeResults(cache, run.results, today);
     const found = [...run.results.values()].filter((r) => r.id).length;
+    const reasons = {};
+    for (const { id, reason } of run.results.values()) if (!id && reason) reasons[reason] = (reasons[reason] ?? 0) + 1;
+    const why = Object.keys(reasons).length > 0 ? ` (${Object.entries(reasons).map(([r, n]) => `${n} ${r}`).join(', ')})` : '';
     log(
-      `${config.id}: looked up ${run.results.size} of ${plan.length} planned handles: ${found} found, ` +
-        `${run.results.size - found} missing, ${run.failed} failed` +
+      `${config.id}: looked up ${run.results.size} of ${plan.length} planned ${what}: ${found} found, ` +
+        `${run.results.size - found} not found${why}, ${run.failed} failed` +
         (run.rateLimited ? ', stopped on a rate limit' : '') +
         (run.timedOut ? ', stopped at the time limit' : ''),
     );
@@ -271,34 +351,35 @@ async function resolveListIds(config, { normalized, allow, previous, options }) 
 
   const sourceBlockIds = new Set(normalized.block.ids);
   for (const kind of KINDS) {
-    for (const id of cachedIds(cache, handlesByKind[kind])) normalized[kind].ids.add(id);
+    for (const id of cachedIds(cache, keysByKind[kind])) normalized[kind].ids.add(id);
   }
   const previousBlockIds = new Set(previous?.lists.block.ids ?? []);
   const lookupGrowth = [...normalized.block.ids].filter((id) => !sourceBlockIds.has(id) && !previousBlockIds.has(id)).length;
-  const resolved = listed.filter((h) => cache.get(h)?.id).length;
-  const unchecked = listed.filter((h) => !cache.has(h)).length;
-  log(`${config.id}: ${resolved} of ${listed.length} handles have a channel id, ${unchecked} not looked up yet`);
+  const resolved = listed.filter((key) => cache.get(key)?.id).length;
+  const unchecked = listed.filter((key) => !cache.has(key)).length;
+  log(`${config.id}: ${resolved} of ${listed.length} ${what} have an id, ${unchecked} not looked up yet`);
   return { cache, prunedCache: pruneCache(cache, listed), lookupGrowth };
 }
 
 async function saveCache(options, listId, cache) {
-  await writeFileDeep(cachePath(options, listId), serializeCache(cache, `${listId}: normalized handle, channel id or -, last checked (UTC)`));
+  await writeFileDeep(cachePath(options, listId), serializeCache(cache, `${listId}: lookup key, YouTube id or -, last checked (UTC)`));
 }
 
 // ---------------------------------------------------------------- reporting
 
-function describeVersion(listId, version, changes, commit) {
+function describeVersion(listId, version, changes, acquired) {
   const totals = summarizeDiff(changes);
   const parts = KINDS.map((kind) => `+${totals[kind].add} -${totals[kind].remove} ${kind}`);
-  return `data(${listId}): v${version} (${parts.join(', ')}), source ${shortSha(commit)}`;
+  const label = acquired.length === 1 ? 'source' : 'sources';
+  return `data(${listId}): v${version} (${parts.join(', ')}), ${label} ${acquired.map((a) => shortSha(a.commit)).join(' ')}`;
 }
 
 function guardReport(prepared, force) {
   const lines = [];
-  for (const { config, commit, stats, guard, lists, previous } of prepared) {
+  for (const { config, acquired, stats, guard, lists, previous } of prepared) {
     if (guard.failures.length === 0) continue;
     lines.push(`## ${config.name} (\`${config.id}\`)`, '');
-    lines.push(`Source: ${config.repo} at \`${commit}\``, '');
+    for (const { input, commit } of acquired) lines.push(`Source: ${input.repo} at \`${commit}\``, '');
     lines.push('**Failed checks**', '', ...guard.failures.map((f) => `- \`${f.guard}\`: ${f.message}`), '');
     lines.push('| Number | Value |', '| --- | --- |');
     lines.push(`| Block entries now | ${kindSize(lists, 'block')} |`);
@@ -319,20 +400,23 @@ function guardReport(prepared, force) {
 
 /** Steps 2 to 8 for one list, plus the build plan of step 9. Writes nothing. */
 async function prepareList(config, { options, allow, out }) {
-  const { commit, texts } = await acquireSource(config, options);
-  log(`${config.id}: source ${config.repo} at ${commit}`);
+  const acquired = await acquireInputs(config, options);
+  for (const { input, commit } of acquired) log(`${config.id}: source ${input.repo} at ${commit}`);
 
-  const parse = getParser(config.format);
   const parsed = {};
   const normalized = {};
   for (const kind of KINDS) {
-    parsed[kind] = parse(texts[kind]);
+    parsed[kind] = mergeParsed(
+      acquired.map(({ input, texts }) => (texts[kind] === undefined ? emptyParse() : getParser(input.format)(texts[kind]))),
+    );
     normalized[kind] = normalizeEntries(parsed[kind]);
+    normalized[kind].names = new Map(parsed[kind].names.map((entry) => [entry.key, entry.name]));
     const merged = parsed[kind].handles.length - normalized[kind].rejected.length - normalized[kind].handles.size;
     log(
       `${config.id}: ${kind} ${parsed[kind].entryLines} lines` +
         (parsed[kind].declaredTotal === null ? '' : ` (header ${parsed[kind].declaredTotal})`) +
         ` -> ${normalized[kind].handles.size} handles, ${normalized[kind].ids.size} ids,` +
+        (normalized[kind].names.size > 0 ? ` ${normalized[kind].names.size} artist names,` : '') +
         ` ${merged} duplicates merged, ${parsed[kind].rejected.length + normalized[kind].rejected.length} rejected`,
     );
   }
@@ -361,11 +445,11 @@ async function prepareList(config, { options, allow, out }) {
       previous,
       existing: { snapshots: await listVersions(path.join(base, SNAPSHOT_DIR)), deltas: await listVersions(path.join(base, DELTA_DIR)) },
       lists,
-      commit,
+      provenance: provenance(config, acquired),
       generatedAt: new Date(),
     });
   }
-  return { config, commit, lists, previous, stats, guard, plan, resolution };
+  return { config, acquired, lists, previous, stats, guard, plan, resolution };
 }
 
 /**
@@ -425,13 +509,14 @@ async function publish(options) {
     changed: changed.length > 0,
     commit_message:
       changed.length > 0
-        ? changed.map((p) => describeVersion(p.config.id, p.plan.version, p.plan.changes, p.commit)).join('; ')
+        ? changed.map((p) => describeVersion(p.config.id, p.plan.version, p.plan.changes, p.acquired)).join('; ')
         : 'data(site): update site files without a new list version',
-    lists: prepared.map(({ config, commit, plan }) => ({
+    lists: prepared.map(({ config, acquired, plan }) => ({
       id: config.id,
       version: plan.version,
       changed: plan.changed,
-      source_commit: commit,
+      source_commit: acquired[0].commit,
+      source_commits: Object.fromEntries(acquired.map(({ input, commit }) => [input.repo, commit])),
       changes: summarizeDiff(plan.changes),
     })),
   };

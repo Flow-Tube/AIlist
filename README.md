@@ -1,11 +1,13 @@
 # Flow channel lists
 
-A static, signed, versioned mirror of the [AiSList](https://aisloplist.com) channel lists for
-Flow for Android and Flow Desktop. There is no server: a daily GitHub Action builds JSON files
+A static, signed, versioned mirror of community lists of AI-generated YouTube and YouTube Music
+content for Flow for Android and Flow Desktop. There is no server: a daily GitHub Action builds JSON files
 and Cloudflare Pages serves them at `https://ailist.flow-tube.org`.
 
 - Base URL: `https://ailist.flow-tube.org/v1/`
-- Lists: `aislist` (block and warn lists of YouTube channels that mainly publish AI-generated content)
+- Lists:
+  - `aislist`: block and warn lists of YouTube channels that mainly publish AI-generated content
+  - `aimusic`: a block list of YouTube Music artists that mainly publish AI-generated music
 - Integrity: an Ed25519-signed manifest covers every published file through SHA-256 hashes
 - Updates: immutable snapshots plus small daily deltas
 
@@ -17,6 +19,16 @@ The `aislist` data comes from [AiSList](https://aisloplist.com)
 the manifest's `source` field, on the site's start page, in this README, and in the apps'
 attribution row. The data must not be used commercially.
 
+The `aimusic` list is compiled from two sources, each credited in the manifest's `sources` field
+and in the apps' attribution row:
+
+- [Soul Over AI](https://souloverai.com) ([xoundbyte/soul-over-ai](https://github.com/xoundbyte/soul-over-ai)),
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Data provided by Soul
+  Over AI. Modified from the original: YouTube IDs only, artist names matched to YouTube Music
+  artists, merged with Spotify AI Blocker.
+- [Spotify AI Blocker](https://github.com/CennoxX/spotify-ai-blocker), Copyright (c) 2026
+  CennoxX, licensed under the MIT License. Artist names matched to YouTube Music artists.
+
 The code in this repository is licensed under the GNU General Public License v3.0 (see `LICENSE`).
 
 ## Published files
@@ -27,9 +39,9 @@ non-ASCII characters are written raw.
 | Path | Changes? | Purpose |
 | --- | --- | --- |
 | `/v1/index.json` | Yes | Unsigned, informational catalogue of available lists |
-| `/v1/aislist/manifest.json` | Once per new version | Signed envelope; the only file clients poll |
-| `/v1/aislist/snapshot/<version>.json` | Never | The full list at that version (newest 3 kept) |
-| `/v1/aislist/delta/<version>.json` | Never | Changes from `version - 1` to `version` (newest 30 kept) |
+| `/v1/<list-id>/manifest.json` | Once per new version | Signed envelope; the only file clients poll |
+| `/v1/<list-id>/snapshot/<version>.json` | Never | The full list at that version (newest 3 kept) |
+| `/v1/<list-id>/delta/<version>.json` | Never | Changes from `version - 1` to `version` (newest 30 kept) |
 
 `version` is an integer starting at 1. It goes up by exactly 1 only when the list content
 changes; a run with no change publishes no new version.
@@ -75,6 +87,8 @@ canonical JSON is needed. Decoded payload:
 - `deltas` lists every delta still hosted, newest first. Version 1 has no delta.
 - `max_delta_chain` is the most deltas a client should chain before taking the snapshot instead.
 - `list` is inside the signed payload, so a manifest for one list cannot be served in place of another.
+- A list compiled from several sources has `sources` instead of `source`: an array of the same
+  objects, each with an extra `attribution` string to show where the data is credited.
 
 ### snapshot/&lt;version&gt;.json
 
@@ -130,6 +144,16 @@ block shows up as a `warn` remove and a `block` add.
 }
 ```
 
+### The aimusic list
+
+`aimusic` uses the same files and update procedure. Its differences:
+
+- Only `block.ids` is filled. `block.handles`, `warn.handles` and `warn.ids` are always empty.
+- `ids` are the channel IDs of YouTube Music artists (the `browseId` of an artist page, as song
+  and album rows credit them) and of the artists' own YouTube channels where a source names one.
+- Match a song, video or album when its uploader or **any** credited artist ID is in the set.
+- It is a separate list with its own switch in the apps; fetch it only while that switch is on.
+
 ### Compatibility rules
 
 - Clients ignore unknown fields. New optional fields can be added inside `/v1/` at any time.
@@ -152,9 +176,9 @@ test runs it against real pipeline output.
 
 ### Update procedure
 
-1. `GET /v1/aislist/manifest.json` with `If-None-Match` from the last response. On `304`, stop.
+1. `GET /v1/<list-id>/manifest.json` with `If-None-Match` from the last response. On `304`, stop.
 2. Verify the envelope signature (see Signature check). On failure, stop.
-3. Parse the payload. Stop if `schema` is greater than 1, if `list` is not `aislist`, or if
+3. Parse the payload. Stop if `schema` is greater than 1, if `list` is not the list asked for, or if
    `version` is lower than the stored version. If `version` equals the stored version, stop.
 4. Choose the path:
    - **Deltas** when a list is stored, `version - stored` is at most `max_delta_chain`, and
@@ -264,15 +288,21 @@ look, re-run `publish.yml` with `force: true`, which skips only the shrink and g
 
 ### Channel IDs
 
-A source that has a `resolve` block in its config gets the channel ID of each listed handle
-from YouTube's public `navigation/resolve_url` endpoint. Lookups are cached in
+A source that has a `resolve` block in its config looks up YouTube IDs for entries that do not
+carry one. With `lookup: handle` (`aislist`) each listed handle gets its channel ID from YouTube's
+public `navigation/resolve_url` endpoint. With `lookup: artist-name` (`aimusic`) each artist name
+is searched on YouTube Music with the Artists filter, and an ID is published only when exactly one
+artist's name matches (compared after NFKC, lowercasing and whitespace folding) and that artist's
+audience is at most `max_audience`. A name shared by two artists, or a well-known artist who only
+shares a listed name, is skipped. Artists are keyed by their Spotify ID, so a name in both sources
+is looked up once. Lookups are cached in
 `cache/<list-id>.tsv` on the `resolve-cache` branch (`handle`, `channel ID or -`, `last checked`),
 so each handle costs one request and then a recheck:
 
-- Each run looks up at most `daily_budget` handles: handles new since the last version first,
-  then handles never looked up, then cached entries due a recheck, oldest first.
+- Each run looks up at most `daily_budget` entries per list: handles new since the last version
+  first, then entries never looked up, then cached entries due a recheck, oldest first.
 - A found ID is rechecked after `recheck_found_days`, so a handle that moved to another channel
-  is corrected; a handle with no channel is retried after `recheck_missing_days`.
+  is corrected; an entry with no match is retried after `recheck_missing_days`.
 - Lookups stop at `max_minutes`, or at once on a 429, and the run publishes what it has.
   A failed lookup is not cached and is retried next run.
 - The cache keeps only handles still listed. When a guard stops the run, it is saved unpruned,
@@ -314,10 +344,11 @@ writes the cache to `./cache`. Run it again on the same folder to see the unchan
 | `src/verify-tree.js` | Self-check of a built tree, also used for the live smoke test |
 | `src/publish.js` | Entry point; runs the steps in order and owns all file access |
 | `src/constants.js` | Schema version, retention counts, key id and tree paths |
-| `sources/<id>.json` | Everything source-specific: URLs, files, format, licence, guard thresholds |
+| `sources/<id>.json` | Everything source-specific: URLs, files, format, licence, guard thresholds, lookups. A compiled list names its sources under `inputs` |
 | `overrides/allow.txt` | Handles or IDs never published |
 | `keys/<key_id>.pub.pem` | Public signing keys |
 | `static/` | `_headers`, `index.html` and `404.html`, copied into the tree on every run |
 
-A second source list is one new `sources/<id>.json` plus, if its format differs, one new
-parser in `src/parse.js`.
+A new list is one new `sources/<id>.json` plus, if its format differs, one new parser in
+`src/parse.js`. A list built from several sources lists them under `inputs`, each with its own
+`repo`, `branch`, `files` (`block`, optionally `warn`), `format`, `license` and `attribution`.

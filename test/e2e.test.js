@@ -209,3 +209,47 @@ test('channel ids fill in over runs within the lookup budget, and the cache surv
   await assert.rejects(publish('v4-shrunk'));
   assert.deepEqual(await cacheLines(), before);
 });
+
+test('a compiled list merges its inputs, resolves names, lists every source and serves the client', async (t) => {
+  const work = await mkdtemp(path.join(tmpdir(), 'ailist-e2e-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const out = path.join(work, 'out');
+  const summaryPath = path.join(work, 'summary.json');
+  await run(
+    process.execPath,
+    [
+      'src/publish.js', '--dry-run',
+      '--out', out,
+      '--sources', path.join(FIXTURES, 'sources-aimusic'),
+      '--allow', path.join(FIXTURES, 'allow-aimusic.txt'),
+      '--source-dir', path.join(FIXTURES, 'source-aimusic'),
+      '--source-commit', 'e'.repeat(40),
+      '--cache', path.join(work, 'cache'),
+      '--resolve-fixture', path.join(FIXTURES, 'resolve-answers-aimusic.json'),
+      '--summary', summaryPath,
+    ],
+    { cwd: ROOT },
+  );
+  const summary = JSON.parse(await readFile(summaryPath, 'utf8'));
+  assert.equal(summary.commit_message, 'data(aimusic): v1 (+5 -0 block, +0 -0 warn), sources eeeeeee eeeeeee');
+
+  const lists = snapshotLists(JSON.parse(await readFile(path.join(out, listDir('aimusic'), 'snapshot', '1.json'), 'utf8')));
+  assert.deepEqual(lists.block.ids, [
+    'UCalphaMusicArtistAAAAAA',
+    'UCalphaOwnChannelAAAAAAA',
+    'UCbetaMusicArtistAAAAAAA',
+    'UCdeltaMusicArtistAAAAAA',
+    'UClonelySynthAAAAAAAAAAA',
+  ]);
+  assert.deepEqual(lists.warn, { handles: [], ids: [] });
+
+  const envelope = JSON.parse(await readFile(path.join(out, manifestPath('aimusic')), 'utf8'));
+  const payload = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
+  assert.equal(payload.source, undefined);
+  assert.deepEqual(payload.sources.map((s) => [s.name, s.license]), [['Soul Over AI', 'CC BY 4.0'], ['Spotify AI Blocker', 'MIT']]);
+  assert.match(payload.sources[0].attribution, /Soul Over AI \(https:\/\/souloverai\.com\)/);
+
+  const storePath = path.join(work, 'client-store.json');
+  const result = await runUpdate({ get: serve(out), storePath, publicKeys: { [KEY_ID]: summary.public_key_pem }, listId: 'aimusic' });
+  assert.deepEqual(result, { outcome: 'snapshot', version: 1 });
+});

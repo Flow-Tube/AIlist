@@ -96,6 +96,17 @@ const checkFileRef = (ref, expectedPath, where) => {
   return errors;
 };
 
+/** One provenance entry: name, homepage, repo and licence strings plus a full commit sha. */
+function checkSource(source, where) {
+  if (!isObject(source)) return [`${where} is missing`];
+  const errors = [];
+  for (const field of ['name', 'homepage', 'repo', 'license']) {
+    if (typeof source[field] !== 'string' || source[field] === '') errors.push(`${where}.${field} is missing`);
+  }
+  if (!COMMIT_SHA_PATTERN.test(source.commit ?? '')) errors.push(`${where}.commit is not a full commit sha`);
+  return errors;
+}
+
 export function checkPayloadShape(payload, listId) {
   const where = 'manifest payload';
   if (!isObject(payload)) return [`${where} is not a JSON object`];
@@ -120,14 +131,16 @@ export function checkPayloadShape(payload, listId) {
   }
   if (!isPositiveInt(payload.max_delta_chain)) errors.push(`${where}: max_delta_chain is not a positive integer`);
   if (!isObject(payload.counts)) errors.push(`${where}: counts is missing`);
-  const source = payload.source;
-  if (!isObject(source)) {
-    errors.push(`${where}: source is missing`);
+  const hasSource = payload.source !== undefined;
+  const hasSources = payload.sources !== undefined;
+  if (hasSource === hasSources) {
+    errors.push(`${where}: needs exactly one of source and sources`);
+  } else if (hasSource) {
+    errors.push(...checkSource(payload.source, `${where}: source`));
+  } else if (!Array.isArray(payload.sources) || payload.sources.length === 0) {
+    errors.push(`${where}: sources is not a non-empty array`);
   } else {
-    for (const field of ['name', 'homepage', 'repo', 'license']) {
-      if (typeof source[field] !== 'string' || source[field] === '') errors.push(`${where}: source.${field} is missing`);
-    }
-    if (!COMMIT_SHA_PATTERN.test(source.commit ?? '')) errors.push(`${where}: source.commit is not a full commit sha`);
+    payload.sources.forEach((source, i) => errors.push(...checkSource(source, `${where}: sources[${i}]`)));
   }
   return errors;
 }

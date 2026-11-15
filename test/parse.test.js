@@ -61,3 +61,38 @@ test('extra comment prefixes are honoured when asked for', () => {
 test('unknown formats throw', () => {
   assert.throws(() => getParser('csv'), /Unknown source format "csv"/);
 });
+
+test('soul-over-ai-json keeps youtube ids and looks every artist up by name', () => {
+  const parse = getParser('soul-over-ai-json');
+  const spotify = 'a'.repeat(22);
+  const result = parse(
+    JSON.stringify([
+      { id: 'one', name: ' One ', removed: false, spotify, youtube: 'UCoooooooooooooooooooooo' },
+      { id: 'two', name: 'Two', removed: false, spotify: null, youtube: 'not-an-id' },
+      { id: 'gone', name: 'Gone', removed: true, spotify, youtube: 'UCgggggggggggggggggggggg' },
+      { id: 'empty', name: '', removed: false, spotify: null, youtube: null },
+    ]),
+  );
+  assert.deepEqual(result.ids, ['UCoooooooooooooooooooooo']);
+  assert.deepEqual(result.names, [
+    { key: `spotify:${spotify}`, name: 'One', spotify },
+    { key: 'soul-over-ai:two', name: 'Two', spotify: null },
+  ]);
+  assert.equal(result.entryLines, 3);
+  assert.equal(result.rejected.length, 1);
+  assert.throws(() => parse('{}'), /array/);
+});
+
+test('spotify-artist-csv reads quoted names and rejects rows without a Spotify id', () => {
+  const parse = getParser('spotify-artist-csv');
+  const b = 'b'.repeat(22);
+  const c = 'c'.repeat(22);
+  const result = parse(`artist,id\r\nPlain Name,${b}\n"Comma, ""Quoted"" Band",${c}\nno id here\n,${b}\n\n`);
+  assert.deepEqual(result.names, [
+    { key: `spotify:${b}`, name: 'Plain Name', spotify: b },
+    { key: `spotify:${c}`, name: 'Comma, "Quoted" Band', spotify: c },
+  ]);
+  assert.equal(result.entryLines, 4);
+  assert.deepEqual(result.rejected, ['no id here', `,${b}`]);
+  assert.throws(() => parse('name,spotify\n'), /header/);
+});
