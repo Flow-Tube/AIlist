@@ -37,6 +37,8 @@ import { assembleLists, planRelease, makeIndex, encodeJson, snapshotLists, kindS
 import { signEnvelope, readEnvelopeUnverified, generateThrowawayKey } from './sign.js';
 import { verifyTree, checkLiveHeaders } from './verify-tree.js';
 import { downloadSource, createHttpReader } from './fetch.js';
+import { parseCache, serializeCache, pruneCache, planLookups, mergeResults, cachedIds, isoDay } from './resolve-cache.js';
+import { resolveHandle, runLookups } from './resolve.js';
 
 const SIGNING_KEY_ENV = 'AILIST_SIGNING_KEY';
 const GITHUB_TOKEN_ENV = 'GITHUB_TOKEN';
@@ -44,6 +46,7 @@ const SMOKE_ATTEMPTS = 5;
 const SMOKE_DELAY_MS = 30_000;
 const PLACEHOLDER_COMMIT = '0'.repeat(40);
 const REQUIRED_CONFIG_FIELDS = ['id', 'name', 'description', 'homepage', 'repo', 'branch', 'files', 'format', 'license', 'guards'];
+const RESOLVE_LIMITS = ['daily_budget', 'recheck_found_days', 'recheck_missing_days', 'max_minutes'];
 
 const CLI_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
@@ -53,6 +56,9 @@ const CLI_OPTIONS = {
   allow: { type: 'string', default: DEFAULT_PATHS.allow },
   static: { type: 'string', default: DEFAULT_PATHS.static },
   keys: { type: 'string', default: DEFAULT_PATHS.keys },
+  cache: { type: 'string', default: DEFAULT_PATHS.cache },
+  'resolve-budget': { type: 'string' },
+  'resolve-fixture': { type: 'string' },
   'source-dir': { type: 'string' },
   'source-commit': { type: 'string', default: PLACEHOLDER_COMMIT },
   summary: { type: 'string' },
@@ -73,6 +79,9 @@ Options:
   --allow <file>         overrides allow list (default: ${DEFAULT_PATHS.allow})
   --static <dir>         static files copied into the tree (default: ${DEFAULT_PATHS.static})
   --keys <dir>           public keys, named <key_id>.pub.pem (default: ${DEFAULT_PATHS.keys})
+  --cache <dir>          id lookup cache, one <list-id>.tsv per list (default: ${DEFAULT_PATHS.cache})
+  --resolve-budget <n>   most id lookups per list this run (default: the config's daily_budget; 0 = none)
+  --resolve-fixture <f>  answer id lookups from a JSON file of { key: id or null } instead of YouTube
   --source-dir <dir>     read source files from <dir>/<config file path> instead of downloading
   --source-commit <sha>  commit recorded for --source-dir (default: ${PLACEHOLDER_COMMIT})
   --summary <file>       write a JSON run summary, including the data commit message
@@ -131,9 +140,16 @@ export async function loadConfigs(dir) {
     }
     getParser(config.format);
     validateLimits(config.guards);
+    if (config.resolve !== undefined) validateResolve(config.resolve, where);
     configs.push(config);
   }
   return configs;
+}
+
+function validateResolve(resolve, where) {
+  for (const key of RESOLVE_LIMITS) {
+    if (!Number.isInteger(resolve?.[key]) || resolve[key] < 0) throw new Error(`${where}: resolve.${key} must be a non-negative integer`);
+  }
 }
 
 /** Allow-list entries, normalized. An unreadable line is an error, never silently skipped. */
@@ -193,6 +209,82 @@ async function acquireSource(config, options) {
   return { commit: options['source-commit'], texts };
 }
 
+// ---------------------------------------------------------------- id resolution
+
+const cachePath = (options, listId) => path.join(options.cache, `${listId}.tsv`);
+
+/** The lookup function for this run: a fixture file in tests, YouTube otherwise. */
+async function createLookup(options) {
+  if (!options['resolve-fixture']) return (handle) => resolveHandle(handle);
+  const answers = JSON.parse(await readFile(options['resolve-fixture'], 'utf8'));
+  return async (handle) => {
+    if (!Object.hasOwn(answers, handle)) throw new Error(`no fixture answer for ${handle}`);
+    return { id: answers[handle] };
+  };
+}
+
+/**
+ * Look up channel ids for the listed handles within the run's budget, and add
+ * every id the cache knows to the same list kind as its handle. Allow-listed
+ * handles are never looked up and never contribute an id.
+ *
+ * Returns { cache, prunedCache, lookupGrowth }. The caller saves the pruned
+ * cache once the guards pass and the full one when they do not, so a bad source
+ * never costs the lookups already made. lookupGrowth counts block ids that come
+ * from lookups and were not in the previous version, which the growth guard
+ * leaves out: the lookup budget bounds them, and counting them would keep
+ * blocking every run after one aborted with lookups cached.
+ */
+async function resolveListIds(config, { normalized, allow, previous, options }) {
+  const allowed = new Set(allow.handles);
+  const handlesByKind = Object.fromEntries(KINDS.map((kind) => [kind, [...normalized[kind].handles].filter((h) => !allowed.has(h))]));
+  const listed = [...new Set(KINDS.flatMap((kind) => handlesByKind[kind]))];
+  const previousHandles = new Set(previous ? KINDS.flatMap((kind) => previous.lists[kind].handles) : []);
+  const today = isoDay(new Date());
+
+  let cache = parseCache((await readOptional(cachePath(options, config.id)))?.toString('utf8'));
+  const budget = options['resolve-budget'] === undefined ? config.resolve.daily_budget : Number(options['resolve-budget']);
+  if (!Number.isInteger(budget) || budget < 0) throw new Error('--resolve-budget must be a non-negative integer');
+  const plan = planLookups({
+    keys: listed,
+    priority: previous ? listed.filter((h) => !previousHandles.has(h)) : [],
+    cache,
+    today,
+    budget,
+    recheckFoundDays: config.resolve.recheck_found_days,
+    recheckMissingDays: config.resolve.recheck_missing_days,
+  });
+  if (plan.length > 0) {
+    const run = await runLookups(plan, await createLookup(options), {
+      deadline: Date.now() + config.resolve.max_minutes * 60_000,
+      spacingMs: options['resolve-fixture'] ? 0 : undefined,
+    });
+    cache = mergeResults(cache, run.results, today);
+    const found = [...run.results.values()].filter((r) => r.id).length;
+    log(
+      `${config.id}: looked up ${run.results.size} of ${plan.length} planned handles: ${found} found, ` +
+        `${run.results.size - found} missing, ${run.failed} failed` +
+        (run.rateLimited ? ', stopped on a rate limit' : '') +
+        (run.timedOut ? ', stopped at the time limit' : ''),
+    );
+  }
+
+  const sourceBlockIds = new Set(normalized.block.ids);
+  for (const kind of KINDS) {
+    for (const id of cachedIds(cache, handlesByKind[kind])) normalized[kind].ids.add(id);
+  }
+  const previousBlockIds = new Set(previous?.lists.block.ids ?? []);
+  const lookupGrowth = [...normalized.block.ids].filter((id) => !sourceBlockIds.has(id) && !previousBlockIds.has(id)).length;
+  const resolved = listed.filter((h) => cache.get(h)?.id).length;
+  const unchecked = listed.filter((h) => !cache.has(h)).length;
+  log(`${config.id}: ${resolved} of ${listed.length} handles have a channel id, ${unchecked} not looked up yet`);
+  return { cache, prunedCache: pruneCache(cache, listed), lookupGrowth };
+}
+
+async function saveCache(options, listId, cache) {
+  await writeFileDeep(cachePath(options, listId), serializeCache(cache, `${listId}: normalized handle, channel id or -, last checked (UTC)`));
+}
+
 // ---------------------------------------------------------------- reporting
 
 function describeVersion(listId, version, changes, commit) {
@@ -245,14 +337,16 @@ async function prepareList(config, { options, allow, out }) {
     );
   }
 
-  const lists = assembleLists(normalized, allow);
   const previous = await readPrevious(out, config.id);
+  const resolution = config.resolve ? await resolveListIds(config, { normalized, allow, previous, options }) : null;
+  const lists = assembleLists(normalized, allow);
   const stats = measureSource(parsed, normalized);
   const guard = checkGuards({
     limits: config.guards,
     stats,
     blockEntries: kindSize(lists, 'block'),
     previousBlockEntries: previous ? kindSize(previous.lists, 'block') : null,
+    lookupGrowth: resolution?.lookupGrowth ?? 0,
     force: options.force,
   });
   log(`${config.id}: after overrides and overlap: block ${kindSize(lists, 'block')}, warn ${kindSize(lists, 'warn')}`);
@@ -271,7 +365,7 @@ async function prepareList(config, { options, allow, out }) {
       generatedAt: new Date(),
     });
   }
-  return { config, commit, lists, previous, stats, guard, plan };
+  return { config, commit, lists, previous, stats, guard, plan, resolution };
 }
 
 /**
@@ -299,7 +393,11 @@ async function publish(options) {
   const prepared = [];
   for (const config of configs) prepared.push(await prepareList(config, { options, allow, out }));
 
-  if (prepared.some((p) => p.guard.failures.length > 0)) {
+  const blocked = prepared.some((p) => p.guard.failures.length > 0);
+  for (const { config, resolution } of prepared) {
+    if (resolution) await saveCache(options, config.id, blocked ? resolution.cache : resolution.prunedCache);
+  }
+  if (blocked) {
     if (options.report) await writeFileDeep(options.report, guardReport(prepared, options.force));
     throw new GuardAbort('A guard aborted the run. Nothing was written.');
   }

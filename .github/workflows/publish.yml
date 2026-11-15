@@ -23,11 +23,12 @@ env:
   PAGES_PROJECT: flow-ailist
   WRANGLER_VERSION: 4.156.0
   DATA_BRANCH: data
+  CACHE_BRANCH: resolve-cache
 
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,16 +50,40 @@ jobs:
             git worktree add --orphan -b "$DATA_BRANCH" site
           fi
 
+      - name: Check out the lookup cache branch into cache/
+        run: |
+          if git ls-remote --exit-code --heads origin "$CACHE_BRANCH" > /dev/null; then
+            git fetch --no-tags --depth=1 origin "$CACHE_BRANCH"
+            git worktree add -B "$CACHE_BRANCH" cache FETCH_HEAD
+          else
+            echo "No $CACHE_BRANCH branch yet: starting with an empty cache."
+            git worktree add --orphan -b "$CACHE_BRANCH" cache
+          fi
+
       - name: Build, sign and self-check
         env:
           AILIST_SIGNING_KEY: ${{ secrets.AILIST_SIGNING_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           FORCE_FLAG: ${{ inputs.force && '--force' || '' }}
         run: |
-          node src/publish.js --out site \
+          node src/publish.js --out site --cache cache \
             --summary "$RUNNER_TEMP/summary.json" \
             --report "$RUNNER_TEMP/guard-report.md" \
             $FORCE_FLAG
+
+      - name: Commit and push the lookup cache
+        if: always()
+        run: |
+          cd cache
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Cache unchanged: nothing to commit."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet -m "cache: id lookups $(date -u +%F)"
+          git push origin "HEAD:refs/heads/$CACHE_BRANCH"
 
       - name: Open or update the publish-blocked issue
         if: failure()

@@ -109,3 +109,13 @@ test('missing thresholds are a config error', () => {
   assert.throws(() => validateLimits({ ...LIMITS, max_growth_ratio: undefined }), /guards\.max_growth_ratio/);
   assert.throws(() => validateLimits(undefined), /guards\.min_block_entries/);
 });
+
+test('ids found by this run\'s lookups do not count as growth, source growth still does', () => {
+  const limits = { min_block_entries: 1, max_shrink_ratio: 0.1, max_growth_ratio: 0.25, max_reject_ratio: 0.5, max_header_mismatch_ratio: 0.5 };
+  const stats = { entryLines: 10, rejected: 0, headers: [] };
+  const base = { limits, stats, previousBlockEntries: 100 };
+  assert.deepEqual(checkGuards({ ...base, blockEntries: 300, lookupGrowth: 190 }).failures, []);
+  const failed = checkGuards({ ...base, blockEntries: 300, lookupGrowth: 50 }).failures;
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].message, /50 of them new lookups/);
+});

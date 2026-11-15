@@ -161,3 +161,51 @@ test('a guard abort exits non-zero, writes a report and leaves the tree unchange
   const forced = await publishFixture(work, 'v4-shrunk', ['--force']);
   assert.equal(forced.lists[0].version, 2);
 });
+
+test('channel ids fill in over runs within the lookup budget, and the cache survives a guard abort', async (t) => {
+  const work = await mkdtemp(path.join(tmpdir(), 'ailist-e2e-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const out = path.join(work, 'out');
+  const cacheDir = path.join(work, 'cache');
+  const publish = (version, extra = []) =>
+    publishFixture(work, version, [
+      '--sources', path.join(FIXTURES, 'sources-resolve'),
+      '--cache', cacheDir,
+      '--resolve-fixture', path.join(FIXTURES, 'resolve-answers.json'),
+      ...extra,
+    ]);
+  const cacheLines = async () =>
+    (await readFile(path.join(cacheDir, `${LIST}.tsv`), 'utf8')).split('\n').filter((l) => l && !l.startsWith('#'));
+
+  // Budget 5 per run: the first run resolves the first five handles in sorted order.
+  await publish('v1');
+  const v1 = await readSnapshotLists(out, 1);
+  assert.equal((await cacheLines()).length, 5);
+  assert.ok(v1.block.ids.includes('UCabcdefghijklmnopqrstuv'), 'source ids are kept');
+  assert.ok(v1.block.ids.length > 1, 'resolved ids are published');
+
+  // v2 adds handles: new ones are looked up before the backlog.
+  const s2 = await publish('v2');
+  assert.equal(s2.lists[0].version, 2);
+  const v2 = await readSnapshotLists(out, 2);
+  for (const id of ['UCnewoneAAAAAAAAAAAAAAAA', 'UCnewtwoAAAAAAAAAAAAAAAA']) assert.ok(v2.block.ids.includes(id), `${id} resolved first`);
+
+  // Repeated runs drain the backlog; the allow-listed handle is never looked up or published.
+  for (let i = 0; i < 4; i += 1) await publish('v2');
+  const lines = await cacheLines();
+  assert.ok(!lines.some((l) => l.startsWith('allowedfalsepositive\t')));
+  assert.ok(lines.some((l) => l.startsWith('소소한작업실-z8d\t-\t')), 'a miss is cached as -');
+  const manifest = JSON.parse(await readFile(path.join(out, manifestPath(LIST)), 'utf8'));
+  const counts = JSON.parse(Buffer.from(manifest.payload, 'base64').toString('utf8')).counts;
+  assert.equal(counts.block_ids, 14, '13 resolved plus the source id');
+  assert.equal(counts.warn_ids, 2);
+  const latest = await readSnapshotLists(out, JSON.parse(Buffer.from(manifest.payload, 'base64').toString('utf8')).version);
+  assert.ok(latest.block.ids.includes('UCwarntwoAAAAAAAAAAAAAAA'), 'warn-two moved to block in v2, and its id with it');
+  assert.ok(!latest.warn.ids.includes('UCwarntwoAAAAAAAAAAAAAAA'), 'block wins over warn for ids too');
+  assert.ok(!latest.block.ids.includes('UCallowedfalseAAAAAAAAAA'));
+
+  // A guard abort keeps every cached lookup, even for handles the bad source dropped.
+  const before = await cacheLines();
+  await assert.rejects(publish('v4-shrunk'));
+  assert.deepEqual(await cacheLines(), before);
+});

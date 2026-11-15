@@ -17,5 +17,11 @@
     "max_growth_ratio": 0.25,
     "max_reject_ratio": 0.01,
     "max_header_mismatch_ratio": 0.01
+  },
+  "resolve": {
+    "daily_budget": 5000,
+    "recheck_found_days": 90,
+    "recheck_missing_days": 30,
+    "max_minutes": 12
   }
 }
