@@ -215,7 +215,7 @@
           </details>
           <ul class="params" style="margin-top:14px">
             <li><code>handles</code> Normalized (see <a href="#match">Match a channel</a>), without <code>@</code>, deduplicated and sorted.</li>
-            <li><code>ids</code> Channel IDs matching <code>^UC[A-Za-z0-9_-]{22}$</code>. Empty for now; check them anyway.</li>
+            <li><code>ids</code> Channel IDs matching <code>^UC[A-Za-z0-9_-]{22}$</code>. They include the resolved ID of each listed handle, so check both.</li>
             <li>An entry in <code>block</code> never also appears in <code>warn</code>.</li>
           </ul>
         </div>
@@ -373,8 +373,8 @@ normalizeHandle('@Bad%ZZname');              // null (rejected)</code></pre>
       const m = decodePayload(envelope.payload);
       const updated = new Date(m.generated_at);
       $('s-version').textContent = `v${m.version}`;
-      $('s-block').textContent = number.format(m.counts.block_handles + m.counts.block_ids);
-      $('s-warn').textContent = number.format(m.counts.warn_handles + m.counts.warn_ids);
+      $('s-block').textContent = number.format(m.counts.block_handles);
+      $('s-warn').textContent = number.format(m.counts.warn_handles);
       $('s-updated').textContent = relative(updated);
       $('s-updated').title = updated.toUTCString();
       const commit = document.createElement('a');
