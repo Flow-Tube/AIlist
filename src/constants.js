@@ -38,6 +38,7 @@ export const DEFAULT_PATHS = Object.freeze({
   static: 'static',
   keys: 'keys',
   out: 'site',
+  cache: 'cache',
 });
 
 /** Published tree layout. Tree paths are relative to the site root. */

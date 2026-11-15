@@ -48,9 +48,11 @@ const percent = (ratio) => `${(ratio * 100).toFixed(2)}%`;
  *
  * blockEntries:         block size (handles + ids) after overrides.
  * previousBlockEntries: block size of the previous snapshot, or null on the first run.
+ * lookupGrowth:         ids from lookups that the previous version did not have. They are bounded
+ *                       by the lookup budget, not by the source, so the growth guard leaves them out.
  * force:                skip only the shrink and growth guards.
  */
-export function checkGuards({ limits, stats, blockEntries, previousBlockEntries, force = false }) {
+export function checkGuards({ limits, stats, blockEntries, previousBlockEntries, lookupGrowth = 0, force = false }) {
   validateLimits(limits);
   const failures = [];
   const skipped = [];
@@ -80,9 +82,10 @@ export function checkGuards({ limits, stats, blockEntries, previousBlockEntries,
     if (shrink > previousBlockEntries * limits.max_shrink_ratio) {
       fail('shrink', `block shrank from ${previousBlockEntries} to ${blockEntries} (-${percent(shrink / previousBlockEntries)}), more than ${percent(limits.max_shrink_ratio)}`);
     }
-    const growth = blockEntries - previousBlockEntries;
+    const growth = blockEntries - previousBlockEntries - lookupGrowth;
     if (growth > previousBlockEntries * limits.max_growth_ratio) {
-      fail('growth', `block grew from ${previousBlockEntries} to ${blockEntries} (+${percent(growth / previousBlockEntries)}), more than ${percent(limits.max_growth_ratio)}`);
+      const fromLookups = lookupGrowth > 0 ? `, ${lookupGrowth} of them new lookups` : '';
+      fail('growth', `block grew from ${previousBlockEntries} to ${blockEntries}${fromLookups} (+${percent(growth / previousBlockEntries)} from the source), more than ${percent(limits.max_growth_ratio)}`);
     }
   }
 

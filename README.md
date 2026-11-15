@@ -89,8 +89,10 @@ canonical JSON is needed. Decoded payload:
 ```
 
 - `handles` are normalized (see below), stored without the `@`, deduplicated, sorted.
-- `ids` are channel IDs matching `^UC[A-Za-z0-9_-]{22}$`, deduplicated, sorted. They are empty
-  until channel IDs are resolved; clients must already check them.
+- `ids` are channel IDs matching `^UC[A-Za-z0-9_-]{22}$`, deduplicated, sorted. They hold the
+  IDs the source lists directly plus the channel ID of every listed handle the pipeline has
+  resolved (see [Channel IDs](#channel-ids)). A handle and its ID are both published, in the
+  same list.
 - An entry in `block` never also appears in `warn`.
 
 ### delta/&lt;version&gt;.json
@@ -192,7 +194,7 @@ or a failed verification means: keep the current list, do nothing else.
 ### Matching
 
 - A channel is listed when its normalized handle is in `handles` or its channel ID is in `ids`.
-  Check both from day one; `ids` is empty for now.
+  Check both: many screens (YouTube Music in particular) show a channel ID but no handle.
 - `block` and `warn` are separate sets with separate user switches.
 - An item with neither a handle nor a listed ID is not filtered.
 - Matching is exact string equality against a hash set. Never use prefix or substring matching:
@@ -245,18 +247,42 @@ shared fixture in all three codebases.
 
 1. Checks out `main` and the `data` branch (the published tree) into `site/`.
 2. Pins AiSList to its current commit and downloads both list files from that commit.
-3. Parses, normalizes and deduplicates; removes `overrides/allow.txt` entries from both lists;
-   removes anything in `block` from `warn`.
+3. Parses, normalizes and deduplicates; looks up channel IDs for listed handles within the daily
+   budget (see [Channel IDs](#channel-ids)); removes `overrides/allow.txt` entries from both
+   lists; removes anything in `block` from `warn`.
 4. Runs the guards from `sources/aislist.json`: minimum block size, reject ratio, `Total Channels`
    header mismatch, and (against the previous snapshot) maximum shrink and growth.
 5. If the lists changed, writes a new snapshot and delta and prunes old ones.
 6. Signs the manifest, regenerates `index.json`, copies `static/`, and self-checks the whole tree.
-7. Commits `site/` to `data` when it changed, deploys it to Cloudflare Pages, and smoke-tests the
-   live site (signature, hashes, headers, and a real 404 for a missing path).
+7. Commits the lookup cache to `resolve-cache` (even when a guard stopped the run), commits
+   `site/` to `data` when it changed, deploys it to Cloudflare Pages, and smoke-tests the live
+   site (signature, hashes, headers, and a real 404 for a missing path).
 
 **When a guard aborts**, the run fails, the live list stays at the last good version, and an
 issue labelled `publish-blocked` is opened (or commented on) with the numbers. After a human
 look, re-run `publish.yml` with `force: true`, which skips only the shrink and growth guards.
+
+### Channel IDs
+
+A source that has a `resolve` block in its config gets the channel ID of each listed handle
+from YouTube's public `navigation/resolve_url` endpoint. Lookups are cached in
+`cache/<list-id>.tsv` on the `resolve-cache` branch (`handle`, `channel ID or -`, `last checked`),
+so each handle costs one request and then a recheck:
+
+- Each run looks up at most `daily_budget` handles: handles new since the last version first,
+  then handles never looked up, then cached entries due a recheck, oldest first.
+- A found ID is rechecked after `recheck_found_days`, so a handle that moved to another channel
+  is corrected; a handle with no channel is retried after `recheck_missing_days`.
+- Lookups stop at `max_minutes`, or at once on a 429, and the run publishes what it has.
+  A failed lookup is not cached and is retried next run.
+- The cache keeps only handles still listed. When a guard stops the run, it is saved unpruned,
+  so a bad source never costs the lookups already made.
+- An allow-listed handle is never looked up, and its ID is never published.
+- The growth guard leaves out looked-up IDs that are new since the last version, since the
+  budget already bounds them; growth from the source itself is still checked.
+
+Losing the cache branch drops the resolved IDs on the next run, which the shrink guard stops.
+Restore the branch rather than forcing the run.
 
 **False positives** go in `overrides/allow.txt`, one `@handle` or channel ID per line, through a
 pull request. They are removed from both lists on the next run.
@@ -267,12 +293,13 @@ Requires Node 22 or newer. There are no dependencies to install.
 
 ```sh
 node --test                                  # unit and end-to-end tests, no network
-node src/publish.js --dry-run --out ./out    # real AiSList source, throwaway signing key
+node src/publish.js --dry-run --out ./out --resolve-budget 0   # real source, throwaway key, no ID lookups
 node src/publish.js --help                   # all options
 ```
 
 A dry run downloads the real source, builds and self-checks the tree in `./out`, and touches
-nothing remote. Run it again on the same folder to see the unchanged or delta path.
+nothing remote. Without `--resolve-budget 0` it also looks up channel IDs against YouTube and
+writes the cache to `./cache`. Run it again on the same folder to see the unchanged or delta path.
 
 | Path | Responsibility |
 | --- | --- |
@@ -281,6 +308,8 @@ nothing remote. Run it again on the same folder to see the unchanged or delta pa
 | `src/normalize.js` | The handle rules above |
 | `src/guards.js` | Size and change-rate checks |
 | `src/build.js` | Lists, snapshot, delta, pruning, manifest payload, index |
+| `src/resolve-cache.js` | Lookup cache format, lookup planning and merging |
+| `src/resolve.js` | Handle to channel ID lookups against YouTube, with a budget and a stop on 429 |
 | `src/sign.js` | Ed25519 envelope sign and verify |
 | `src/verify-tree.js` | Self-check of a built tree, also used for the live smoke test |
 | `src/publish.js` | Entry point; runs the steps in order and owns all file access |
