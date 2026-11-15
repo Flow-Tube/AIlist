@@ -95,3 +95,32 @@ test('runLookups stops at the deadline', async () => {
   assert.equal(run.results.size, 2);
   assert.equal(run.timedOut, true);
 });
+
+test('artist rows come from artist results only, with their audience', async () => {
+  const { artistRows, parseAudience } = await import('../src/resolve.js');
+  const row = (id, name, subtitle, pageType = 'MUSIC_PAGE_TYPE_ARTIST') => ({
+    musicResponsiveListItemRenderer: {
+      navigationEndpoint: { browseEndpoint: { browseId: id, browseEndpointContextSupportedConfigs: { browseEndpointContextMusicConfig: { pageType } } } },
+      flexColumns: [name, subtitle].map((text) => ({ musicResponsiveListItemFlexColumnRenderer: { text: { runs: [{ text }] } } })),
+    },
+  });
+  const json = { contents: [{ shelf: [row(ID_A, 'Alpha', 'Artist • 2.31K subscribers'), row(ID_B, 'Beta', 'Album', 'MUSIC_PAGE_TYPE_ALBUM')] }] };
+  assert.deepEqual(artistRows(json), [{ id: ID_A, name: 'Alpha', audience: 2310 }]);
+  assert.equal(parseAudience('Artist • 4.46M monthly audience'), 4_460_000);
+  assert.equal(parseAudience('Artist • 1,204 subscribers'), 1204);
+  assert.equal(parseAudience('Artist'), null);
+});
+
+test('pickArtist takes only a unique exact folded match under the audience ceiling', async () => {
+  const { pickArtist, foldName } = await import('../src/resolve.js');
+  const limit = { maxAudience: 500_000 };
+  assert.equal(foldName('  The  Ｖelvet\tSundown '), 'the velvet sundown');
+  assert.deepEqual(pickArtist('Velvet Sundown', [{ id: ID_A, name: 'velvet  sundown', audience: 24 }], limit), { id: ID_A, reason: 'found' });
+  assert.deepEqual(pickArtist('Velvet Sundown', [{ id: ID_A, name: 'The Velvet Sundown', audience: 24 }], limit), { id: null, reason: 'none' });
+  assert.deepEqual(
+    pickArtist('Twin', [{ id: ID_A, name: 'Twin', audience: 1 }, { id: ID_B, name: 'twin', audience: 2 }], limit),
+    { id: null, reason: 'ambiguous' },
+  );
+  assert.deepEqual(pickArtist('Star', [{ id: ID_A, name: 'Star', audience: 4_000_000 }], limit), { id: null, reason: 'too-popular' });
+  assert.deepEqual(pickArtist('Same', [{ id: ID_A, name: 'Same', audience: 3 }, { id: ID_A, name: 'Same', audience: null }], limit), { id: ID_A, reason: 'found' });
+});

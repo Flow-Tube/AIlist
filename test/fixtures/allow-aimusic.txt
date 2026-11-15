@@ -1,0 +1,2 @@
+# Fixture override for the compiled list: an artist id.
+UCallowedArtistAAAAAAAAA

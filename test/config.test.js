@@ -11,8 +11,26 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 test('the committed source configs load and validate', async () => {
   const configs = await loadConfigs(path.join(ROOT, DEFAULT_PATHS.sources));
-  assert.deepEqual(configs.map((c) => c.id), ['aislist']);
-  assert.equal(configs[0].license, 'CC BY-NC 4.0');
+  assert.deepEqual(configs.map((c) => c.id), ['aimusic', 'aislist']);
+  const byId = Object.fromEntries(configs.map((c) => [c.id, c]));
+  assert.equal(byId.aislist.license, 'CC BY-NC 4.0');
+  assert.deepEqual(byId.aimusic.inputs.map((i) => i.license), ['CC BY 4.0', 'MIT']);
+  assert.ok(byId.aimusic.inputs.every((i) => i.attribution), 'every compiled input carries its attribution');
+});
+
+test('a compiled list needs files.block on every input and a known lookup', async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ailist-config-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const guards = { min_block_entries: 1, max_shrink_ratio: 0.1, max_growth_ratio: 0.1, max_reject_ratio: 0.1, max_header_mismatch_ratio: 0.1 };
+  const input = { name: 'I', homepage: 'h', repo: 'o/r', branch: 'main', files: { block: 'a.json' }, format: 'soul-over-ai-json', license: 'l' };
+  const base = { id: 'y', name: 'Y', description: 'd', homepage: 'h', license: 'l', guards };
+  await writeFile(path.join(dir, 'y.json'), JSON.stringify({ ...base, inputs: [{ ...input, files: {} }] }));
+  await assert.rejects(loadConfigs(dir), /inputs\[0\]: files\.block is missing/);
+  const resolve = { lookup: 'artist-name', daily_budget: 1, recheck_found_days: 1, recheck_missing_days: 1, max_minutes: 1 };
+  await writeFile(path.join(dir, 'y.json'), JSON.stringify({ ...base, inputs: [input], resolve }));
+  await assert.rejects(loadConfigs(dir), /max_audience/);
+  await writeFile(path.join(dir, 'y.json'), JSON.stringify({ ...base, inputs: [input], resolve: { ...resolve, lookup: 'guess' } }));
+  await assert.rejects(loadConfigs(dir), /resolve\.lookup/);
 });
 
 test('the committed allow list parses with no invalid lines', async () => {
